@@ -1,0 +1,241 @@
+---
+title: "Project Based - Project Two - Toward a Data Mining Portfolio"
+author: "James Applewhite"
+date: "`r Sys.Date()`"
+output: word_document
+---
+
+
+```{r setup, include=FALSE, echo = FALSE, results = FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = normalizePath("C:/Users/james/OneDrive/Documents/R_MSBA/560"))
+```
+
+```{r library,}
+library(e1071)
+library(klaR)
+library(nnet)
+library(MASS)
+library(rpart)
+library(rpart.plot)
+library(randomForest)
+library(mlbench)
+library(mice)
+library(VIM)
+library(tidyverse)
+library(caret)
+```
+
+Load the data
+
+```{r }
+# load the data
+data("BreastCancer")
+```
+
+
+Transform the data
+
+```{r }
+# remove the Id column
+BreastCancer$Id <- NULL 
+mydata2 <- BreastCancer
+
+# many of these columns need to be converted into numeric
+str(mydata2)
+
+mydata2$Cl.thickness<-as.numeric(mydata2$Cl.thickness)
+mydata2$Mitoses<-as.numeric(mydata2$Mitoses)
+mydata2$Cell.size<-as.numeric(mydata2$Cell.size)
+mydata2$Cell.shape<-as.numeric(mydata2$Cell.shape)
+mydata2$Marg.adhesion<-as.numeric(mydata2$Marg.adhesion)
+mydata2$Epith.c.size<-as.numeric(mydata2$Epith.c.size)
+mydata2$Bare.nuclei<-as.numeric(mydata2$Bare.nuclei)
+mydata2$Bl.cromatin<-as.numeric(mydata2$Bl.cromatin)
+mydata2$Normal.nucleoli<-as.numeric(mydata2$Normal.nucleoli)
+
+
+# convert Class to malignant = 1 and benign = 0. This will help with downstream ensemble reading
+mydata2$Class<-ifelse(mydata2$Class=="malignant",1,0)
+mydata2$Class<-as.factor(mydata2$Class)
+
+
+# Bare.nuclei has 16 missing values, about 2.3% of the data. It might not be too costly to remove those 16 rows, but applying mice imputation could be a better option. The other numeric variables have high correlation with Bare.nuclei, up to 0.71, so I will use mice.
+
+summary(mydata2$Bare.nuclei)
+mice_plot <- aggr(mydata2, 
+                   numbers=TRUE, sortVars=TRUE,
+                   labels=names(mydata2), cex.axis=.7,
+                   gap=3, ylab=c("Missing data","Pattern"))
+
+imputed_Data <- mice(mydata2, m=5, maxit = 50, method = 'cart', seed = 500)
+imputed_Data$imp$Bare.nuclei
+mydata2 <- complete(imputed_Data,2)
+summary(mydata2$Bare.nuclei)
+
+
+# there are no other missing values or sespected errors and the 699 rows have been maintained.
+```
+
+
+Support vector machine
+
+```{r }
+mysvm <- svm(Class ~ ., mydata2)
+mysvm.pred <- predict(mysvm, mydata2)
+table(mysvm.pred, mydata2$Class)
+
+```
+
+
+Naive Bayes classifier
+
+```{r }
+mynb <- NaiveBayes(Class ~ ., mydata2)
+mynb.pred <- predict(mynb,mydata2)
+table(mynb.pred$class,mydata2$Class)
+
+```
+
+
+Neural Network
+
+```{r }
+#set.seed(1)
+mynnet <- nnet(Class ~ ., mydata2, size=1)
+mynnet.pred <- predict(mynnet,mydata2,type="class")
+table(mynnet.pred,mydata2$Class)
+
+```
+
+
+Decision trees
+
+```{r }
+mytree <- rpart(Class ~ ., mydata2)
+
+# plot(mytree); text(mytree) # in "iris_tree.ps"
+rpart.plot(mytree, type=3, digits = 3, fallen.leaves = TRUE)
+
+# summary(mytree)
+mytree.pred <- predict(mytree,mydata2,type="class")
+table(mytree.pred,mydata2$Class)
+mytree.pred2 <- mytree.pred
+```
+
+
+Leave-1-Out Cross Validation (LOOCV)
+
+```{r }
+ans <- numeric(length(mydata2[,1]))
+for (i in 1:length(mydata2[,1])) {
+  mytree <- rpart(Class ~ ., mydata2[-i,])
+  mytree.pred <- predict(mytree,mydata2[i,],type="class")
+  ans[i] <- mytree.pred
+}
+ans <- factor(ans,labels=levels(mydata2$Class))
+table(ans,mydata2$Class)
+# The same as above in this case
+
+```
+
+
+Quadratic Discriminant Analysis
+
+```{r }
+myqda <- qda(Class ~ ., mydata2)
+myqda.pred <- predict(myqda, mydata2)
+table(myqda.pred$class,mydata2$Class)
+
+```
+
+
+Regularised Discriminant Analysis
+
+```{r }
+#set.seed(1)
+myrda <- rda(Class ~ ., mydata2)
+myrda.pred <- predict(myrda, mydata2)
+table(myrda.pred$class,mydata2$Class)
+
+```
+
+
+Random Forests
+
+```{r }
+myrf <- randomForest(Class ~ .,mydata2)
+myrf.pred <- predict(myrf, mydata2)
+table(myrf.pred, mydata2$Class)
+
+```
+
+Create the ensemble
+
+```{r }
+# create the ensemble dataframe. This includes 7 models previously created along with the reference from the original BreastCancer dataset.
+Ensemble <- as.data.frame(cbind(
+  as.data.frame(mysvm.pred),
+  mynb.pred$class,
+  as.factor(mynnet.pred),
+  mytree.pred2,
+  myqda.pred$class,
+  myrda.pred$class,
+  myrf.pred,
+  mydata2$Class))
+
+# rename all the columns
+colnames(Ensemble) <- c("svm","nb","nnet","tree","qda","rda","rf","reference")
+
+Ensemble$svm <- as.numeric(ifelse(Ensemble$svm=="0",0,1))
+Ensemble$nb <- as.numeric(ifelse(Ensemble$nb=="0",0,1))
+Ensemble$nnet <- as.numeric(ifelse(Ensemble$nnet=="0",0,1))
+Ensemble$tree <- as.numeric(ifelse(Ensemble$tree=="0",0,1))
+Ensemble$qda <- as.numeric(ifelse(Ensemble$qda=="0",0,1))
+Ensemble$rda <- as.numeric(ifelse(Ensemble$rda=="0",0,1))
+Ensemble$rf <- as.numeric(ifelse(Ensemble$rf=="0",0,1))
+Ensemble$reference <- as.numeric(ifelse(Ensemble$reference=="0",0,1))
+
+# check for any issues
+summary(Ensemble)
+str(Ensemble)
+
+# since there are 7 models involed, there will always be a tiebreaker
+final <- ifelse((rowSums(Ensemble)/7)>0.5,1,0)
+Ensemble <- cbind(Ensemble, final)
+
+# the final table output using all 7 models to determine the choice
+confusionMatrix(as.factor(Ensemble$final), as.factor(Ensemble$reference))
+
+```
+
+
+Review confusion matrix results
+
+```{r }
+svm <- confusionMatrix(as.factor(Ensemble$svm), as.factor(Ensemble$reference))
+nb <- confusionMatrix(as.factor(Ensemble$nb), as.factor(Ensemble$reference))
+nnet <- confusionMatrix(as.factor(Ensemble$nnet), as.factor(Ensemble$reference))
+tree <- confusionMatrix(as.factor(Ensemble$tree), as.factor(Ensemble$reference))
+qda <- confusionMatrix(as.factor(Ensemble$qda), as.factor(Ensemble$reference))
+rda <- confusionMatrix(as.factor(Ensemble$rda), as.factor(Ensemble$reference))
+rf <- confusionMatrix(as.factor(Ensemble$rf), as.factor(Ensemble$reference))
+final <-confusionMatrix(as.factor(Ensemble$final), as.factor(Ensemble$reference))
+
+sensitivity <- c(svm$byClass[1],nb$byClass[1],nnet$byClass[1],tree$byClass[1],qda$byClass[1],rda$byClass[1],rf$byClass[1],final$byClass[1])
+specificity <- c(svm$byClass[2],nb$byClass[2],nnet$byClass[2],tree$byClass[2],qda$byClass[2],rda$byClass[2],rf$byClass[2],final$byClass[2])
+precision <- c(svm$byClass[5],nb$byClass[5],nnet$byClass[5],tree$byClass[5],qda$byClass[5],rda$byClass[5],rf$byClass[5],final$byClass[5])
+recall <- c(svm$byClass[6],nb$byClass[6],nnet$byClass[6],tree$byClass[6],qda$byClass[6],rda$byClass[6],rf$byClass[6],final$byClass[6])
+f1 <- c(svm$byClass[7],nb$byClass[7],nnet$byClass[7],tree$byClass[7],qda$byClass[7],rda$byClass[7],rf$byClass[7],final$byClass[7])
+balanced_accuracy <- c(svm$byClass[11],nb$byClass[11],nnet$byClass[11],tree$byClass[11],qda$byClass[11],rda$byClass[11],rf$byClass[11],final$byClass[11])
+
+
+results <- data.frame(sensitivity, specificity, precision, recall, f1, balanced_accuracy)
+
+# rows 1 through 7 repesent the single classifiers
+# row 8 represents the aggregation of all 7 classifiers
+results
+
+# Comparing each of these accuracy measures, the ensemble method is consistently #2 or 3 (random forest happened to predict perfectly). Any downside a single given model has is accounted for in the ensemble.
+
+```
