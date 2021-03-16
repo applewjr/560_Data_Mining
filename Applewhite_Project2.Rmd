@@ -74,16 +74,26 @@ mydata2 <- complete(imputed_Data,2)
 summary(mydata2$Bare.nuclei)
 
 
-# there are no other missing values or sespected errors and the 699 rows have been maintained.
+# there are no other missing values or suspected errors and the 699 rows have been maintained.
 ```
 
+Split train and validation data
+
+```{r }
+#set.seed(1)
+train.index <- sample(row.names(mydata2), 0.6*dim(mydata2)[1])  
+valid.index <- setdiff(row.names(mydata2), train.index)  
+train.df <- mydata2[train.index, ]
+valid.df <- mydata2[valid.index, ]
+
+```
 
 Support vector machine
 
 ```{r }
-mysvm <- svm(Class ~ ., mydata2)
-mysvm.pred <- predict(mysvm, mydata2)
-table(mysvm.pred, mydata2$Class)
+mysvm <- svm(Class ~ ., train.df)
+mysvm.pred <- predict(mysvm, valid.df)
+table(mysvm.pred, valid.df$Class)
 
 ```
 
@@ -91,9 +101,9 @@ table(mysvm.pred, mydata2$Class)
 Naive Bayes classifier
 
 ```{r }
-mynb <- NaiveBayes(Class ~ ., mydata2)
-mynb.pred <- predict(mynb,mydata2)
-table(mynb.pred$class,mydata2$Class)
+mynb <- NaiveBayes(Class ~ ., train.df)
+mynb.pred <- predict(mynb, valid.df)
+table(mynb.pred$class, valid.df$Class)
 
 ```
 
@@ -102,9 +112,9 @@ Neural Network
 
 ```{r }
 #set.seed(1)
-mynnet <- nnet(Class ~ ., mydata2, size=1)
-mynnet.pred <- predict(mynnet,mydata2,type="class")
-table(mynnet.pred,mydata2$Class)
+mynnet <- nnet(Class ~ ., train.df, size=1)
+mynnet.pred <- predict(mynnet, valid.df, type="class")
+table(mynnet.pred, valid.df$Class)
 
 ```
 
@@ -112,14 +122,14 @@ table(mynnet.pred,mydata2$Class)
 Decision trees
 
 ```{r }
-mytree <- rpart(Class ~ ., mydata2)
+mytree <- rpart(Class ~ ., train.df)
 
 # plot(mytree); text(mytree) # in "iris_tree.ps"
 rpart.plot(mytree, type=3, digits = 3, fallen.leaves = TRUE)
 
 # summary(mytree)
-mytree.pred <- predict(mytree,mydata2,type="class")
-table(mytree.pred,mydata2$Class)
+mytree.pred <- predict(mytree, valid.df, type="class")
+table(mytree.pred, valid.df$Class)
 mytree.pred2 <- mytree.pred
 ```
 
@@ -127,14 +137,14 @@ mytree.pred2 <- mytree.pred
 Leave-1-Out Cross Validation (LOOCV)
 
 ```{r }
-ans <- numeric(length(mydata2[,1]))
-for (i in 1:length(mydata2[,1])) {
-  mytree <- rpart(Class ~ ., mydata2[-i,])
-  mytree.pred <- predict(mytree,mydata2[i,],type="class")
+ans <- numeric(length(train.df[,1]))
+for (i in 1:length(train.df[,1])) {
+  mytree <- rpart(Class ~ ., train.df[-i,])
+  mytree.pred <- predict(mytree, valid.df[i,], type="class")
   ans[i] <- mytree.pred
 }
-ans <- factor(ans,labels=levels(mydata2$Class))
-table(ans,mydata2$Class)
+ans <- factor(ans, labels=levels(valid.df$Class))
+table(ans, train.df$Class)
 # The same as above in this case
 
 ```
@@ -143,9 +153,9 @@ table(ans,mydata2$Class)
 Quadratic Discriminant Analysis
 
 ```{r }
-myqda <- qda(Class ~ ., mydata2)
-myqda.pred <- predict(myqda, mydata2)
-table(myqda.pred$class,mydata2$Class)
+myqda <- qda(Class ~ ., train.df)
+myqda.pred <- predict(myqda, valid.df)
+table(myqda.pred$class, valid.df$Class)
 
 ```
 
@@ -154,9 +164,9 @@ Regularised Discriminant Analysis
 
 ```{r }
 #set.seed(1)
-myrda <- rda(Class ~ ., mydata2)
-myrda.pred <- predict(myrda, mydata2)
-table(myrda.pred$class,mydata2$Class)
+myrda <- rda(Class ~ ., train.df)
+myrda.pred <- predict(myrda, valid.df)
+table(myrda.pred$class, valid.df$Class)
 
 ```
 
@@ -164,9 +174,9 @@ table(myrda.pred$class,mydata2$Class)
 Random Forests
 
 ```{r }
-myrf <- randomForest(Class ~ .,mydata2)
-myrf.pred <- predict(myrf, mydata2)
-table(myrf.pred, mydata2$Class)
+myrf <- randomForest(Class ~ .,train.df)
+myrf.pred <- predict(myrf, valid.df)
+table(myrf.pred, valid.df$Class)
 
 ```
 
@@ -182,7 +192,7 @@ Ensemble <- as.data.frame(cbind(
   myqda.pred$class,
   myrda.pred$class,
   myrf.pred,
-  mydata2$Class))
+  valid.df$Class))
 
 # rename all the columns
 colnames(Ensemble) <- c("svm","nb","nnet","tree","qda","rda","rf","reference")
@@ -200,7 +210,7 @@ Ensemble$reference <- as.numeric(ifelse(Ensemble$reference=="0",0,1))
 summary(Ensemble)
 str(Ensemble)
 
-# since there are 7 models involed, there will always be a tiebreaker
+# since there are 7 models involved, there will always be a tiebreaker
 final <- ifelse((rowSums(Ensemble)/7)>0.5,1,0)
 Ensemble <- cbind(Ensemble, final)
 
@@ -229,13 +239,12 @@ recall <- c(svm$byClass[6],nb$byClass[6],nnet$byClass[6],tree$byClass[6],qda$byC
 f1 <- c(svm$byClass[7],nb$byClass[7],nnet$byClass[7],tree$byClass[7],qda$byClass[7],rda$byClass[7],rf$byClass[7],final$byClass[7])
 balanced_accuracy <- c(svm$byClass[11],nb$byClass[11],nnet$byClass[11],tree$byClass[11],qda$byClass[11],rda$byClass[11],rf$byClass[11],final$byClass[11])
 
-
 results <- data.frame(sensitivity, specificity, precision, recall, f1, balanced_accuracy)
 
-# rows 1 through 7 repesent the single classifiers
+# rows 1 through 7 represent the single classifiers
 # row 8 represents the aggregation of all 7 classifiers
 results
 
-# Comparing each of these accuracy measures, the ensemble method is consistently #2 or 3 (random forest happened to predict perfectly). Any downside a single given model has is accounted for in the ensemble.
+# Comparing each of these accuracy measures, the ensemble method is consistently #1, 2, or 3 and with an average of rankings better than any other individual model. The decision tree has a relatively low specificity and balanced accuracy, but any downside a single given model has is accounted for in the ensemble.
 
 ```
